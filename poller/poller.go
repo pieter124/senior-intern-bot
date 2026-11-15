@@ -20,7 +20,7 @@ type BoardPoller struct {
 }
 
 func getGreenhouseURL(company string) string {
-	return fmt.Sprintf("https://boards-api.greenhouse.io/v1/boards/%s/jobs?content=true", company)
+	return fmt.Sprintf("https://boards-api.greenhouse.io/v1/boards/%s/jobs", company)
 }
 
 func getAshbyURL(company string) string {
@@ -31,36 +31,60 @@ func New() *BoardPoller {
 	return &BoardPoller{
 		greenhouseCompanies: GreenhouseCompanies,
 		ashbyCompanies:      AshbyCompanies,
-		client:              &http.Client{Timeout: 10 * time.Second},
+		client: &http.Client{
+			Timeout:   30 * time.Second,
+			Transport: &http.Transport{MaxConnsPerHost: 32},
+		},
 	}
 }
 
+type pollResult struct {
+	postings []domain.Posting
+	err      error
+}
+
 func (poller *BoardPoller) Poll() ([]domain.Posting, error) {
+	total := len(poller.greenhouseCompanies) + len(poller.ashbyCompanies)
+
+	// Buffered to total so no send ever blocks.
+	results := make(chan pollResult, total)
+	for _, company := range poller.greenhouseCompanies {
+		go poller.pollGreenhouseJob(company, results)
+	}
+	for _, company := range poller.ashbyCompanies {
+		go poller.pollAshbyJob(company, results)
+	}
+
 	var (
 		polled []domain.Posting
 		errs   []error
 	)
-
-	// Poll greenhouse companies
-	for _, company := range poller.greenhouseCompanies {
-		postings, err := poller.pollGreenhouse(company)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("greenhouse %s: %w", company, err))
+	for range total {
+		r := <-results
+		if r.err != nil {
+			errs = append(errs, r.err)
 			continue
 		}
-		polled = append(polled, postings...)
-	}
-
-	// Poll ashby companies
-	for _, company := range poller.ashbyCompanies {
-		postings, err := poller.pollAshby(company)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("ashby %s: %w", company, err))
-		}
-		polled = append(polled, postings...)
+		polled = append(polled, r.postings...)
 	}
 
 	return polled, errors.Join(errs...)
+}
+
+func (poller *BoardPoller) pollGreenhouseJob(company string, results chan<- pollResult) {
+	postings, err := poller.pollGreenhouse(company)
+	if err != nil {
+		err = fmt.Errorf("greenhouse %s: %w", company, err)
+	}
+	results <- pollResult{postings, err}
+}
+
+func (poller *BoardPoller) pollAshbyJob(company string, results chan<- pollResult) {
+	postings, err := poller.pollAshby(company)
+	if err != nil {
+		err = fmt.Errorf("ashby %s: %w", company, err)
+	}
+	results <- pollResult{postings, err}
 }
 
 func (poller *BoardPoller) fetch(url string, into any) error {
