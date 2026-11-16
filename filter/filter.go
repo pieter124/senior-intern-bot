@@ -44,7 +44,7 @@ func NewDefault() *KeywordFilter {
 	return New(RoleAxis, RegionAxis, DisciplineAxis)
 }
 
-func (filter *KeywordFilter) Classify(posting domain.Posting) domain.Verdict {
+func (filter *KeywordFilter) classify(posting domain.Posting) domain.Verdict {
 	role := filter.role.evaluate(posting.Title)
 	region := filter.region.evaluate(posting.Location)
 	discipline := filter.discipline.evaluate(posting.Title)
@@ -62,7 +62,7 @@ func (filter *KeywordFilter) Classify(posting domain.Posting) domain.Verdict {
 func (filter *KeywordFilter) Filter(postings []domain.Posting) (map[domain.Verdict][]domain.Posting, error) {
 	postingsByVerdict := make(map[domain.Verdict][]domain.Posting)
 	for _, p := range postings {
-		verdict := filter.Classify(p)
+		verdict := filter.classify(p)
 		postingsByVerdict[verdict] = append(postingsByVerdict[verdict], p)
 	}
 	return postingsByVerdict, nil
