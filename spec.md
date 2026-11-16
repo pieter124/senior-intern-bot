@@ -163,8 +163,8 @@ implicitly coupled to one vendor's payload shape.
 Greenhouse's `?content=true` inlines full HTML descriptions. Measured across 33
 boards, that raises a poll cycle from a few MB to **81 MB** (6,678 postings,
 ~12 KB each), which at 20-minute intervals is 5.7 GB/day. The largest boards
-(Databricks 9 MB, Anthropic 8.4 MB) also exceed a 10-second request timeout on
-an ordinary connection, meaning the biggest sources would be the ones that fail
+(Databricks 9 MB, Anthropic 8.4 MB) also exceeded the 10-second request
+timeout in use at the time on an ordinary connection, meaning the biggest sources would be the ones that fail
 most reliably.
 
 Since §4.4 restricts classification to `title` and `location`, descriptions buy
@@ -175,6 +175,30 @@ descriptions only for the handful of `REVIEW` postings per cycle via the
 single-job endpoint, not for all postings on every cycle. Note that Greenhouse
 double-encodes the content field (`&lt;p&gt;`), so entity decoding and tag
 stripping would be required before any matching.
+
+### 5.3 Fetching
+
+Boards are fetched concurrently within a poll cycle, then the pipeline after
+`Poll` runs sequentially.
+
+- `Poll` starts one goroutine per watched board (currently 61 Greenhouse and
+  25 Ashby). Each sends a single result, either its postings or an error
+  wrapped with source and company, on a channel buffered to the board count,
+  so no goroutine ever blocks on sending.
+- There is no worker pool. The only limit on parallelism is the shared HTTP
+  transport's `MaxConnsPerHost: 32`, applied per API host.
+- Each request has a 30-second timeout. Go's client timeout covers the whole
+  request, including time spent waiting for a free connection, so the fetch
+  phase of a cycle is bounded at roughly 30 seconds. A board that doesn't
+  finish in time counts as failed for that cycle.
+- `Poll` waits for every result, gathers the postings into one slice, and
+  joins the errors, so the partial-failure rule above still holds and a failed
+  board is retried on the next poll.
+
+Because results are gathered before `Poll` returns, `Dedupe`, `Filter`,
+`Send` and `Store` still run one after another on a single goroutine. Only
+one call touches SQLite at a time, so the single-writer constraint of §6
+needs no extra locking.
 
 ## 6. Identity and persistence
 
@@ -321,3 +345,4 @@ possible silent loss, which is the accepted trade per §1.
 | 2026-09 | `postings` table gains a `url` column beyond §6's original list | Cheap to store, kept for possible future audit/history features even though it's not read for classification |
 | 2026-09 | Deferred `REJECT`-as-one-way-door and `REVIEW` reclassification (§7.1) | v1 ships a simpler existence-check `Dedupe` to get a working pipeline out first; the fuller behavior is documented, not dropped |
 | 2026-09 | `Storer.Store` commits one transaction per call, `INSERT OR IGNORE` on conflict | `Dedupe` already filters upstream, so a collision reaching `Store` is a rare edge case, not the normal path — no need for per-posting atomicity, and `IGNORE` keeps that edge case from crashing the batch |
+| 2026-11 | Boards fetched concurrently, one goroutine per board, results gathered before `Dedupe` (§5.3) | Sequential fetching of ~85 boards at 10 s each had a worst case near 14 minutes, against a 20-minute tick and a 15-minute p50 latency target (§3). Gathering before `Dedupe` keeps database access on one goroutine |
