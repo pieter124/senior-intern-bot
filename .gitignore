@@ -3,3 +3,4 @@
 .env*
 !.env.example
 .idea/
+.claude/settings.local.json
