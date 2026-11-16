@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestKeywordFilter_Classify(t *testing.T) {
+func TestKeywordFilter_classify(t *testing.T) {
 	// An axis a case leaves unset is the zero Axis{}, which always evaluates
 	// to unknown, so each case lists only the keywords that matter to it.
 	var tests = []struct {
@@ -85,7 +85,7 @@ func TestKeywordFilter_Classify(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			filter := New(tt.role, tt.region, tt.discipline)
-			got := filter.Classify(tt.posting)
+			got := filter.classify(tt.posting)
 			if got != tt.want {
 				t.Errorf("Classify(%+v): got %+v, want %+v", tt.posting, got, tt.want)
 			}
