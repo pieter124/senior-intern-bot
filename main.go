@@ -111,6 +111,8 @@ func main() {
 		log.Println("error creating orchestrator: ", err)
 	}
 
+	// Initial tick
+	orchestratorServ.Tick()
 	if err := orchestratorServ.Start(); err != nil {
 		log.Println("error starting orchestrator: ", err)
 	}
