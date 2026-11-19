@@ -32,41 +32,45 @@ func New(poller poller.Poller, deduper deduper.Deduper, filter filter.Filterer, 
 	}, nil
 }
 
+func (orchestrator *Orchestrator) Tick() {
+	// Poll
+	polledPostings, err := orchestrator.poller.Poll()
+	if err != nil {
+		log.Println("error polling: ", err)
+	}
+
+	// Dedupe
+	dedupedPostings, err := orchestrator.deduper.Dedupe(polledPostings)
+	if err != nil {
+		log.Println("error deduping: ", err)
+	}
+
+	// Filter
+	filteredPostingsByVerdict, err := orchestrator.filter.Filter(dedupedPostings)
+	if err != nil {
+		log.Println("error filtering: ", err)
+	}
+
+	// Sender
+	sentPostings, err := orchestrator.sender.Send(filteredPostingsByVerdict)
+	if err != nil {
+		log.Println("error sending: ", err)
+	}
+
+	// Storer (to implement)
+	err = orchestrator.storer.Store(sentPostings)
+	if err != nil {
+		log.Println("error storing: ", err)
+	}
+}
+
 func (orchestrator *Orchestrator) MainLoop() {
 	for {
 		select {
 		case <-orchestrator.isDoneChannel:
 			return
 		case <-orchestrator.ticker.C:
-			// Poll
-			polledPostings, err := orchestrator.poller.Poll()
-			if err != nil {
-				log.Println("error polling: ", err)
-			}
-
-			// Dedupe
-			dedupedPostings, err := orchestrator.deduper.Dedupe(polledPostings)
-			if err != nil {
-				log.Println("error deduping: ", err)
-			}
-
-			// Filter
-			filteredPostingsByVerdict, err := orchestrator.filter.Filter(dedupedPostings)
-			if err != nil {
-				log.Println("error filtering: ", err)
-			}
-
-			// Sender
-			sentPostings, err := orchestrator.sender.Send(filteredPostingsByVerdict)
-			if err != nil {
-				log.Println("error sending: ", err)
-			}
-
-			// Storer (to implement)
-			err = orchestrator.storer.Store(sentPostings)
-			if err != nil {
-				log.Println("error storing: ", err)
-			}
+			orchestrator.Tick()
 		}
 	}
 }
